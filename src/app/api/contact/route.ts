@@ -7,6 +7,13 @@ export async function POST(request: Request) {
   let clientIp = 'unknown';
   
   try {
+    // Log environment variables (safely)
+    console.log('Blob storage configuration:', {
+      hasToken: !!process.env.BLOB_READ_WRITE_TOKEN,
+      hasStoreId: !!process.env.BLOB_STORE_ID,
+      hasPublicUrl: !!process.env.BLOB_PUBLIC_URL
+    });
+
     // Get IP address from headers
     const headersList = headers();
     const forwardedFor = headersList.get('x-forwarded-for');
@@ -37,7 +44,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create a simple submission object
+    // Create a submission object
     const submission = {
       name,
       email,
@@ -50,40 +57,54 @@ export async function POST(request: Request) {
       }
     };
 
-    // Store in Blob with a simple filename
-    const { url } = await put(
-      `submissions/${Date.now()}.json`,
-      JSON.stringify(submission),
-      {
-        access: 'public',
-        addRandomSuffix: true // Adds a random suffix to prevent collisions
-      }
-    );
+    // Generate a unique filename
+    const filename = `submissions/${Date.now()}-${Math.random().toString(36).substring(2)}.json`;
+    
+    console.log('Attempting to store submission:', filename);
+    
+    // Store in Blob
+    const { url } = await put(filename, JSON.stringify(submission, null, 2), {
+      access: 'public',
+      addRandomSuffix: false // We're already adding our own random suffix
+    });
 
-    console.log('Submission stored successfully:', url);
+    console.log('Submission stored successfully at:', url);
 
     return NextResponse.json({
       success: true,
       message: "Thank you for your message! We'll get back to you soon.",
-      remaining: rateLimiter.getRemainingRequests(clientIp)
+      remaining: rateLimiter.getRemainingRequests(clientIp),
+      submissionUrl: url
     });
 
   } catch (error) {
     console.error('Form submission error:', error);
     
-    // More detailed error handling
+    // Detailed error logging
+    if (error instanceof Error) {
+      console.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      });
+    }
+
+    // Check for specific error types
     if (error instanceof Error) {
       if (error.message.includes('BLOB_READ_WRITE_TOKEN')) {
         console.error('Blob storage token missing or invalid');
         return NextResponse.json(
-          { error: "Server configuration error" },
+          { error: "Storage configuration error" },
           { status: 500 }
         );
       }
     }
 
     return NextResponse.json(
-      { error: "Failed to submit form" },
+      { 
+        error: "Failed to submit form",
+        details: error instanceof Error ? error.message : 'Unknown error'
+      },
       { status: 500 }
     );
   }
