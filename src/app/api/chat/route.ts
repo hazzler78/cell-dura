@@ -7,8 +7,7 @@ import rateLimiter from '@/lib/rate-limiter';
 // Initialize OpenAI client with error handling
 let openai: OpenAI | null = null;
 try {
-  // Add diagnostic logging
-  console.log('Environment check:', {
+  console.log('Server-side environment check:', {
     hasApiKey: !!process.env.OPENAI_API_KEY,
     keyPrefix: process.env.OPENAI_API_KEY?.substring(0, 8),
     environment: process.env.NODE_ENV
@@ -18,12 +17,12 @@ try {
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
-    console.log('OpenAI client initialized successfully');
+    console.log('Server-side OpenAI initialized successfully');
   } else {
-    console.warn('OPENAI_API_KEY is missing');
+    console.warn('OPENAI_API_KEY is missing on server-side');
   }
 } catch (error) {
-  console.error('OpenAI initialization error:', error);
+  console.error('Server-side OpenAI initialization error:', error);
 }
 
 const AI_PERSONALITY = `You are Atlas, a friendly and knowledgeable AI consultant who specializes in helping businesses implement AI solutions. Your personality combines approachability with expertise.
@@ -83,15 +82,16 @@ export async function POST(request: Request) {
       );
     }
 
-    // If OpenAI is not initialized, use fallback responses
+    // If OpenAI is not initialized, log and use fallback
     if (!openai) {
-      console.log('OpenAI not initialized, using fallback response for:', message);
+      console.warn('Server-side OpenAI not initialized, using fallback for:', message);
       return NextResponse.json({
         message: getQuantumResponse(message),
         remaining: rateLimiter.getRemainingRequests(clientIp)
       });
     }
 
+    console.log('Attempting OpenAI chat completion with model: gpt-4o-mini');
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -102,28 +102,28 @@ export async function POST(request: Request) {
       temperature: 0.7,
     });
 
+    console.log('OpenAI response received successfully');
     return NextResponse.json({
       message: cleanResponse(response.choices[0].message.content || ''),
       remaining: rateLimiter.getRemainingRequests(clientIp)
     });
   } catch (error) {
-    console.error('OpenAI API Error:', error);
-    // Add detailed error logging
+    console.error('Server-side API Error:', error);
     if (error instanceof Error) {
       console.error('Error details:', {
         message: error.message,
         name: error.name,
-        stack: error.stack,
+        stack: error.stack
       });
     }
     // Check if it's an OpenAI API error
     if ((error as any)?.response?.data) {
       console.error('OpenAI API Error details:', (error as any).response.data);
     }
-    // On any error, use fallback responses with the original message
     return NextResponse.json({
       message: getQuantumResponse(message!),
-      remaining: rateLimiter.getRemainingRequests(clientIp)
+      remaining: rateLimiter.getRemainingRequests(clientIp),
+      error: error instanceof Error ? error.message : 'Unknown error'
     });
   }
 } 

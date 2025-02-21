@@ -4,14 +4,23 @@ import { getQuantumResponse } from './quantum-responses';
 // Initialize OpenAI client with error handling
 let openai: OpenAI | null = null;
 try {
+  console.log('Client-side environment check:', {
+    hasPublicKey: !!process.env.NEXT_PUBLIC_OPENAI_API_KEY,
+    keyPrefix: process.env.NEXT_PUBLIC_OPENAI_API_KEY?.substring(0, 8),
+    environment: process.env.NODE_ENV
+  });
+
   if (process.env.NEXT_PUBLIC_OPENAI_API_KEY) {
     openai = new OpenAI({
       apiKey: process.env.NEXT_PUBLIC_OPENAI_API_KEY,
       dangerouslyAllowBrowser: true // Note: In production, you should proxy through your backend
     });
+    console.log('Client-side OpenAI initialized successfully');
+  } else {
+    console.warn('NEXT_PUBLIC_OPENAI_API_KEY is missing on client-side');
   }
 } catch (error) {
-  console.warn('OpenAI initialization failed, using fallback responses');
+  console.error('Client-side OpenAI initialization error:', error);
 }
 
 const AI_PERSONALITY = `You are Atlas, a friendly and knowledgeable AI consultant who specializes in helping businesses implement AI solutions. Your personality combines approachability with expertise.
