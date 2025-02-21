@@ -46,26 +46,30 @@ export async function POST(request: Request) {
 
     // Create a submission object
     const submission = {
-      name,
-      email,
-      company,
-      message,
+      data: {
+        name,
+        email,
+        company,
+        message
+      },
       timestamp: new Date().toISOString(),
       metadata: {
         ip: clientIp,
-        userAgent: request.headers.get('user-agent') || 'unknown'
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        source: 'website_contact_form'
       }
     };
 
-    // Generate a unique filename
-    const filename = `submissions/${Date.now()}-${Math.random().toString(36).substring(2)}.json`;
+    // Generate a unique filename with timestamp for better sorting
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `submissions/${timestamp}-${Math.random().toString(36).substring(2)}.json`;
     
     console.log('Attempting to store submission:', filename);
     
-    // Store in Blob
-    const { url } = await put(filename, JSON.stringify(submission, null, 2), {
+    // Store in Blob - using compact JSON format
+    const { url } = await put(filename, JSON.stringify(submission), {
       access: 'public',
-      addRandomSuffix: false // We're already adding our own random suffix
+      addRandomSuffix: false
     });
 
     console.log('Submission stored successfully at:', url);
