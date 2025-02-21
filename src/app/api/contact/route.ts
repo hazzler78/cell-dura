@@ -7,12 +7,22 @@ export async function POST(request: Request) {
   let clientIp = 'unknown';
   
   try {
-    // Log environment variables (safely)
-    console.log('Blob storage configuration:', {
+    // Verify Blob configuration
+    const blobConfig = {
       hasToken: !!process.env.BLOB_READ_WRITE_TOKEN,
       hasStoreId: !!process.env.BLOB_STORE_ID,
-      hasPublicUrl: !!process.env.BLOB_PUBLIC_URL
+      tokenPrefix: process.env.BLOB_READ_WRITE_TOKEN?.substring(0, 10),
+      storeId: process.env.BLOB_STORE_ID
+    };
+    
+    console.log('Blob storage configuration:', {
+      ...blobConfig,
+      tokenPrefix: blobConfig.tokenPrefix + '...'
     });
+
+    if (!blobConfig.hasToken || !blobConfig.hasStoreId) {
+      throw new Error('Blob storage configuration missing');
+    }
 
     // Get IP address from headers
     const headersList = headers();
@@ -44,19 +54,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create a submission object
+    // Create a submission object with proper structure
     const submission = {
-      data: {
-        name,
-        email,
-        company,
-        message
-      },
+      name,
+      email,
+      company,
+      message,
       timestamp: new Date().toISOString(),
       metadata: {
         ip: clientIp,
         userAgent: request.headers.get('user-agent') || 'unknown',
-        source: 'website_contact_form'
+        source: 'website_contact_form',
+        storeId: process.env.BLOB_STORE_ID
       }
     };
 
@@ -66,13 +75,26 @@ export async function POST(request: Request) {
     
     console.log('Attempting to store submission:', filename);
     
-    // Store in Blob - using compact JSON format
+    // Store in Blob with proper configuration
     const { url } = await put(filename, JSON.stringify(submission), {
       access: 'public',
-      addRandomSuffix: false
+      addRandomSuffix: false,
+      cacheControlMaxAge: 0 // Disable caching for immediate visibility
     });
 
     console.log('Submission stored successfully at:', url);
+
+    // Verify the submission was stored
+    try {
+      const verifyResponse = await fetch(url);
+      if (!verifyResponse.ok) {
+        throw new Error('Failed to verify submission storage');
+      }
+      const storedData = await verifyResponse.json();
+      console.log('Verified stored submission data structure:', Object.keys(storedData));
+    } catch (verifyError) {
+      console.error('Verification error:', verifyError);
+    }
 
     return NextResponse.json({
       success: true,
@@ -91,14 +113,17 @@ export async function POST(request: Request) {
         message: error.message,
         stack: error.stack
       });
-    }
 
-    // Check for specific error types
-    if (error instanceof Error) {
+      // Check for specific Blob storage errors
       if (error.message.includes('BLOB_READ_WRITE_TOKEN')) {
-        console.error('Blob storage token missing or invalid');
         return NextResponse.json(
-          { error: "Storage configuration error" },
+          { error: "Storage configuration error - token missing or invalid" },
+          { status: 500 }
+        );
+      }
+      if (error.message.includes('STORE_ID')) {
+        return NextResponse.json(
+          { error: "Storage configuration error - store ID missing or invalid" },
           { status: 500 }
         );
       }
