@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   let clientIp = 'unknown';
   
   try {
-    // Verify Blob configuration
+    // Verify Blob configuration with detailed logging
     const blobConfig = {
       hasToken: !!process.env.BLOB_READ_WRITE_TOKEN,
       hasStoreId: !!process.env.BLOB_STORE_ID,
@@ -15,13 +15,20 @@ export async function POST(request: Request) {
       storeId: process.env.BLOB_STORE_ID
     };
     
-    console.log('Blob storage configuration:', {
-      ...blobConfig,
-      tokenPrefix: blobConfig.tokenPrefix + '...'
+    console.log('Detailed Blob storage configuration check:', {
+      hasToken: blobConfig.hasToken,
+      hasStoreId: blobConfig.hasStoreId,
+      tokenLength: process.env.BLOB_READ_WRITE_TOKEN?.length || 0,
+      storeIdLength: process.env.BLOB_STORE_ID?.length || 0,
+      environment: process.env.NODE_ENV
     });
 
-    if (!blobConfig.hasToken || !blobConfig.hasStoreId) {
-      throw new Error('Blob storage configuration missing');
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      throw new Error('BLOB_READ_WRITE_TOKEN is missing');
+    }
+
+    if (!process.env.BLOB_STORE_ID) {
+      throw new Error('BLOB_STORE_ID is missing');
     }
 
     // Get IP address from headers
@@ -44,7 +51,20 @@ export async function POST(request: Request) {
       );
     }
 
+    // Log request body for debugging
+    console.log('Received form data:', {
+      hasBody: !!request.body,
+      contentType: request.headers.get('content-type')
+    });
+
     const formData = await request.json();
+    console.log('Parsed form data:', {
+      hasName: !!formData.name,
+      hasEmail: !!formData.email,
+      hasCompany: !!formData.company,
+      hasMessage: !!formData.message
+    });
+
     const { name, email, company, message } = formData;
 
     if (!name || !email || !company || !message) {
@@ -73,7 +93,11 @@ export async function POST(request: Request) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const filename = `submissions/${timestamp}-${Math.random().toString(36).substring(2)}.json`;
     
-    console.log('Attempting to store submission:', filename);
+    console.log('Attempting to store submission:', {
+      filename,
+      submissionKeys: Object.keys(submission),
+      dataSize: JSON.stringify(submission).length
+    });
     
     // Store in Blob with proper configuration
     const { url } = await put(filename, JSON.stringify(submission), {
@@ -88,12 +112,18 @@ export async function POST(request: Request) {
     try {
       const verifyResponse = await fetch(url);
       if (!verifyResponse.ok) {
-        throw new Error('Failed to verify submission storage');
+        throw new Error(`Failed to verify submission storage: ${verifyResponse.status} ${verifyResponse.statusText}`);
       }
       const storedData = await verifyResponse.json();
-      console.log('Verified stored submission data structure:', Object.keys(storedData));
+      console.log('Verification successful:', {
+        storedDataKeys: Object.keys(storedData),
+        url
+      });
     } catch (verifyError) {
-      console.error('Verification error:', verifyError);
+      console.error('Verification error:', {
+        error: verifyError,
+        url
+      });
     }
 
     return NextResponse.json({
@@ -104,26 +134,40 @@ export async function POST(request: Request) {
     });
 
   } catch (error) {
-    console.error('Form submission error:', error);
+    console.error('Form submission error:', {
+      error,
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : undefined
+    });
     
     // Detailed error logging
     if (error instanceof Error) {
-      console.error('Error details:', {
-        name: error.name,
-        message: error.message,
-        stack: error.stack
-      });
-
       // Check for specific Blob storage errors
       if (error.message.includes('BLOB_READ_WRITE_TOKEN')) {
         return NextResponse.json(
-          { error: "Storage configuration error - token missing or invalid" },
+          { 
+            error: "Storage configuration error",
+            details: "The storage token is missing or invalid. Please check your environment variables."
+          },
           { status: 500 }
         );
       }
       if (error.message.includes('STORE_ID')) {
         return NextResponse.json(
-          { error: "Storage configuration error - store ID missing or invalid" },
+          { 
+            error: "Storage configuration error",
+            details: "The store ID is missing or invalid. Please check your environment variables."
+          },
+          { status: 500 }
+        );
+      }
+      if (error.message.includes('fetch')) {
+        return NextResponse.json(
+          { 
+            error: "Network error",
+            details: "Failed to communicate with the storage service. Please try again."
+          },
           { status: 500 }
         );
       }
@@ -132,7 +176,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { 
         error: "Failed to submit form",
-        details: error instanceof Error ? error.message : 'Unknown error'
+        details: error instanceof Error ? error.message : 'Unknown error occurred'
       },
       { status: 500 }
     );
